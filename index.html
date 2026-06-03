@@ -563,15 +563,12 @@ Rules: Extract all relevant fields for the document type. For national IDs: chec
     const resp = await fetch('/.netlify/functions/claude', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1200,
-        messages: [{ role: 'user', content: prompt }]
-      })
+      body: JSON.stringify({ prompt })
     });
 
     const data = await resp.json();
-    const raw = data.content[0].text.replace(/```json|```/g,'').trim();
+    if (data.error) throw new Error(data.error);
+    const raw = data.text.replace(/```json|```/g,'').trim();
     const result = JSON.parse(raw);
 
     log('Classification complete — ' + result.classification.doc_type + ' (' + Math.round(result.classification.confidence*100) + '%)');
