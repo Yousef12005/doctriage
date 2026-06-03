@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DocTriage — Multi-Agent Document Processing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0a0f;
+  --bg2: #111118;
+  --bg3: #1a1a24;
+  --border: rgba(255,255,255,0.07);
+  --border2: rgba(255,255,255,0.12);
+  --text: #e8e8f0;
+  --muted: #6b6b80;
+  --accent: #7c6cfc;
+  --accent2: #a78bfa;
+  --accent-dim: rgba(124,108,252,0.12);
+  --green: #34d399;
+  --green-dim: rgba(52,211,153,0.1);
+  --amber: #fbbf24;
+  --amber-dim: rgba(251,191,36,0.1);
+  --red: #f87171;
+  --red-dim: rgba(248,113,113,0.1);
+  --mono: 'Space Mono', monospace;
+  --sans: 'DM Sans', sans-serif;
+  --radius: 10px;
+  --radius-sm: 6px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.6;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ── Grid noise overlay ── */
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  pointer-events: none; z-index: 0; opacity: 0.4;
+}
+
+/* ── Layout ── */
+.layout { display: grid; grid-template-columns: 280px 1fr; min-height: 100vh; position: relative; z-index: 1; }
+
+/* ── Sidebar ── */
+.sidebar {
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  position: sticky; top: 0; height: 100vh;
+  overflow-y: auto;
+}
+.sidebar-header {
+  padding: 28px 20px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.logo {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 6px;
+}
+.logo-mark {
+  width: 32px; height: 32px;
+  background: var(--accent);
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-size: 14px; font-weight: 700; color: white;
+}
+.logo-text { font-family: var(--mono); font-size: 15px; font-weight: 700; color: var(--text); letter-spacing: -0.02em; }
+.logo-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+.sidebar-section { padding: 16px 20px; }
+.sidebar-label {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em;
+  color: var(--muted); text-transform: uppercase; margin-bottom: 10px;
+}
+
+.doc-item {
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer; margin-bottom: 4px;
+  transition: all 0.15s; position: relative;
+  overflow: hidden;
+}
+.doc-item:hover { background: var(--bg3); border-color: var(--border); }
+.doc-item.active { background: var(--accent-dim); border-color: var(--accent); }
+.doc-item-name { font-size: 12px; font-weight: 400; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; }
+.doc-item.active .doc-item-name { color: var(--accent2); }
+.doc-item-meta { display: flex; align-items: center; gap: 6px; }
+.doc-type-tag { font-size: 10px; color: var(--muted); }
+.doc-badge {
+  font-size: 9px; font-family: var(--mono); padding: 1px 6px; border-radius: 99px;
+  border: 1px solid; letter-spacing: 0.04em; margin-left: auto;
+}
+.badge-pending { color: var(--muted); border-color: rgba(255,255,255,0.1); }
+.badge-approved { color: var(--green); border-color: rgba(52,211,153,0.3); background: var(--green-dim); }
+.badge-flagged { color: var(--amber); border-color: rgba(251,191,36,0.3); background: var(--amber-dim); }
+.badge-rejected { color: var(--red); border-color: rgba(248,113,113,0.3); background: var(--red-dim); }
+
+.sidebar-footer {
+  margin-top: auto; padding: 16px 20px;
+  border-top: 1px solid var(--border);
+  font-size: 11px; color: var(--muted); line-height: 1.5;
+}
+.sidebar-footer strong { color: var(--accent2); font-weight: 400; }
+
+/* ── Main ── */
+.main { display: flex; flex-direction: column; min-height: 100vh; }
+
+/* ── Top bar ── */
+.topbar {
+  padding: 20px 32px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--bg2); gap: 16px; flex-wrap: wrap;
+}
+.topbar-left { flex: 1; min-width: 0; }
+.topbar-title { font-family: var(--mono); font-size: 14px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+.process-btn {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 20px;
+  background: var(--accent);
+  border: none; border-radius: var(--radius-sm);
+  color: white; font-family: var(--mono); font-size: 12px;
+  cursor: pointer; white-space: nowrap;
+  transition: all 0.2s; flex-shrink: 0;
+  letter-spacing: 0.02em;
+}
+.process-btn:hover { background: var(--accent2); transform: translateY(-1px); }
+.process-btn:active { transform: translateY(0); }
+.process-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+/* ── Pipeline strip ── */
+.pipeline-strip {
+  padding: 24px 32px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 0;
+  overflow-x: auto;
+}
+.pipeline-step { display: flex; align-items: center; gap: 0; flex-shrink: 0; }
+.agent-node {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  min-width: 100px;
+}
+.agent-orb {
+  width: 48px; height: 48px; border-radius: 50%;
+  border: 1px solid var(--border2);
+  background: var(--bg3);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; transition: all 0.4s;
+  position: relative;
+}
+.agent-orb.idle { border-color: var(--border); }
+.agent-orb.running {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  box-shadow: 0 0 20px rgba(124,108,252,0.25);
+  animation: pulse-ring 1.2s ease-in-out infinite;
+}
+.agent-orb.done { border-color: var(--green); background: var(--green-dim); }
+.agent-orb.warn { border-color: var(--amber); background: var(--amber-dim); }
+.agent-orb.fail { border-color: var(--red); background: var(--red-dim); }
+@keyframes pulse-ring {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(124,108,252,0.3); }
+  50% { box-shadow: 0 0 0 8px rgba(124,108,252,0); }
+}
+.agent-name { font-family: var(--mono); font-size: 10px; color: var(--muted); text-align: center; letter-spacing: 0.04em; }
+.agent-detail { font-size: 10px; color: var(--muted); text-align: center; min-height: 14px; transition: all 0.3s; }
+.agent-detail.active { color: var(--accent2); }
+.agent-detail.done { color: var(--green); }
+.agent-detail.warn { color: var(--amber); }
+.agent-detail.fail { color: var(--red); }
+
+.pipe-arrow {
+  width: 32px; height: 1px; background: var(--border2);
+  margin: 0 4px; flex-shrink: 0; position: relative; top: -14px;
+}
+.pipe-arrow::after {
+  content: ''; position: absolute; right: -1px; top: -3px;
+  border: 3px solid transparent; border-left-color: var(--border2);
+}
+
+/* ── Content area ── */
+.content { flex: 1; padding: 28px 32px; display: flex; flex-direction: column; gap: 20px; }
+
+/* ── Decision banner ── */
+.decision-bar {
+  padding: 16px 20px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--bg3);
+  display: flex; align-items: center; gap: 14px;
+  transition: all 0.4s;
+}
+.decision-bar.approved { border-color: rgba(52,211,153,0.3); background: var(--green-dim); }
+.decision-bar.flagged  { border-color: rgba(251,191,36,0.3); background: var(--amber-dim); }
+.decision-bar.rejected { border-color: rgba(248,113,113,0.3); background: var(--red-dim); }
+.decision-icon-wrap {
+  width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--border2);
+  display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0;
+}
+.decision-bar.approved .decision-icon-wrap { border-color: rgba(52,211,153,0.4); background: rgba(52,211,153,0.08); }
+.decision-bar.flagged  .decision-icon-wrap { border-color: rgba(251,191,36,0.4); background: rgba(251,191,36,0.08); }
+.decision-bar.rejected .decision-icon-wrap { border-color: rgba(248,113,113,0.4); background: rgba(248,113,113,0.08); }
+.decision-title { font-family: var(--mono); font-size: 13px; font-weight: 700; }
+.decision-bar.approved .decision-title { color: var(--green); }
+.decision-bar.flagged  .decision-title { color: var(--amber); }
+.decision-bar.rejected .decision-title { color: var(--red); }
+.decision-rec { font-size: 12px; color: var(--muted); margin-top: 3px; }
+
+/* ── Score cards ── */
+.score-row { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; }
+.score-card {
+  background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 14px 16px; text-align: center;
+}
+.score-num { font-family: var(--mono); font-size: 26px; font-weight: 700; margin-bottom: 2px; }
+.score-lbl { font-size: 11px; color: var(--muted); }
+.score-bar-outer { height: 3px; background: var(--border2); border-radius: 99px; margin-top: 10px; overflow: hidden; }
+.score-bar-inner { height: 100%; border-radius: 99px; transition: width 0.8s cubic-bezier(0.4,0,0.2,1); }
+.c-green { color: var(--green); }
+.c-amber { color: var(--amber); }
+.c-red { color: var(--red); }
+.c-accent { color: var(--accent2); }
+
+/* ── Results grid ── */
+.results-3 { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 16px; }
+.card {
+  background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 16px; overflow: hidden;
+}
+.card-header {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 14px; padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.card-icon { font-size: 14px; }
+.card-title { font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+
+.kv { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--border); }
+.kv:last-child { border-bottom: none; }
+.kv-key { font-size: 11px; color: var(--muted); flex-shrink: 0; }
+.kv-val { font-size: 11px; color: var(--text); text-align: right; word-break: break-word; font-family: var(--mono); }
+.kv-val.missing { color: var(--red); font-style: italic; font-family: var(--sans); }
+
+.check { display: flex; align-items: flex-start; gap: 8px; padding: 5px 0; font-size: 11px; }
+.check-ok { color: var(--green); }
+.check-no { color: var(--red); }
+.check-dot { width: 6px; height: 6px; border-radius: 50%; margin-top: 4px; flex-shrink: 0; }
+.check-ok .check-dot { background: var(--green); }
+.check-no .check-dot { background: var(--red); }
+
+.reasoning-box {
+  margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+  font-size: 11px; color: var(--muted); font-style: italic; line-height: 1.6;
+}
+
+.lang-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 9px; font-family: var(--mono); padding: 2px 8px; border-radius: 99px;
+  background: var(--accent-dim); border: 1px solid rgba(124,108,252,0.25); color: var(--accent2);
+  letter-spacing: 0.05em; text-transform: uppercase; margin-left: 8px;
+}
+
+/* ── Empty state ── */
+.empty-state {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 12px;
+  color: var(--muted); text-align: center; padding: 60px 20px;
+}
+.empty-icon { font-size: 48px; opacity: 0.3; }
+.empty-title { font-family: var(--mono); font-size: 14px; color: var(--muted); }
+.empty-sub { font-size: 12px; max-width: 320px; line-height: 1.7; }
+
+/* ── Spinner ── */
+.spinner {
+  width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: white; border-radius: 50%;
+  animation: spin 0.6s linear infinite; flex-shrink: 0;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Blinking cursor for mono text ── */
+.cursor::after { content: '█'; animation: blink 1s step-end infinite; opacity: 0.6; }
+@keyframes blink { 50% { opacity: 0; } }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 99px; }
+
+/* ── Code block ── */
+.code-block {
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 12px; font-family: var(--mono); font-size: 10px; color: #a78bfa;
+  overflow-x: auto; line-height: 1.7; margin-top: 8px;
+  white-space: pre; max-height: 200px; overflow-y: auto;
+}
+
+/* ── Processing log ── */
+.log-line { display: flex; gap: 10px; padding: 3px 0; font-family: var(--mono); font-size: 11px; }
+.log-ts { color: var(--muted); flex-shrink: 0; }
+.log-msg { color: var(--accent2); }
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  .sidebar { position: static; height: auto; }
+  .results-3 { grid-template-columns: 1fr; }
+  .score-row { grid-template-columns: repeat(2,1fr); }
+}
+</style>
+</head>
+<body>
+
+<div class="layout">
+
+  <!-- ── Sidebar ── -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">
+        <div class="logo-mark">DT</div>
+        <span class="logo-text">DocTriage</span>
+      </div>
+      <div class="logo-sub">Multi-agent document processing</div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">Document inbox</div>
+      <div id="doc-list"></div>
+    </div>
+
+    <div class="sidebar-footer">
+      Built with <strong>4 specialist AI agents</strong> — classifier · extractor · validator · evaluator<br><br>
+      Patterns from Andrew Ng's Agentic AI course (M3, M4, M5) + Anthropic Claude courses.<br><br>
+      <strong>Youssef Abdelmoneim</strong> · AUS Computer Engineering
+    </div>
+  </aside>
+
+  <!-- ── Main ── -->
+  <main class="main">
+
+    <!-- Top bar -->
+    <div class="topbar">
+      <div class="topbar-left">
+        <div class="topbar-title" id="topbar-title">Select a document to begin</div>
+        <div class="topbar-sub" id="topbar-sub">Choose from the inbox on the left</div>
+      </div>
+      <button class="process-btn" id="process-btn" onclick="runPipeline()" disabled>
+        <span id="btn-icon">▶</span>
+        <span id="btn-text">Process document</span>
+      </button>
+    </div>
+
+    <!-- Pipeline strip -->
+    <div class="pipeline-strip">
+      <div class="pipeline-step">
+        <div class="agent-node">
+          <div class="agent-orb idle" id="orb-1">🏷</div>
+          <div class="agent-name">CLASSIFIER</div>
+          <div class="agent-detail" id="det-1">M3 tool pattern</div>
+        </div>
+        <div class="pipe-arrow"></div>
+      </div>
+      <div class="pipeline-step">
+        <div class="agent-node">
+          <div class="agent-orb idle" id="orb-2">⚙️</div>
+          <div class="agent-name">EXTRACTOR</div>
+          <div class="agent-detail" id="det-2">M5 code-as-plan</div>
+        </div>
+        <div class="pipe-arrow"></div>
+      </div>
+      <div class="pipeline-step">
+        <div class="agent-node">
+          <div class="agent-orb idle" id="orb-3">🛡</div>
+          <div class="agent-name">VALIDATOR</div>
+          <div class="agent-detail" id="det-3">M3 tool pattern</div>
+        </div>
+        <div class="pipe-arrow"></div>
+      </div>
+      <div class="pipeline-step">
+        <div class="agent-node">
+          <div class="agent-orb idle" id="orb-4">📊</div>
+          <div class="agent-name">EVALUATOR</div>
+          <div class="agent-detail" id="det-4">M4 scoring</div>
+        </div>
+        <div class="pipe-arrow"></div>
+      </div>
+      <div class="agent-node">
+        <div class="agent-orb idle" id="orb-5">🚦</div>
+        <div class="agent-name">DECISION</div>
+        <div class="agent-detail" id="det-5">Awaiting input</div>
+      </div>
+    </div>
+
+    <!-- Content -->
+    <div class="content" id="content">
+      <div class="empty-state">
+        <div class="empty-icon">⬡</div>
+        <div class="empty-title">No document selected</div>
+        <div class="empty-sub">Pick a document from the inbox, then click Process document to run it through all 4 agents live.</div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+const DOCS = [
+  {
+    id:'DOC001', name:'invoice_cairo_pharma.pdf', type:'Invoice',
+    text:`INVOICE\nInvoice Number: INV-2024-0892\nDate: 15 March 2024\nDue Date: 15 April 2024\nVendor: Cairo Pharma Supplies Co.\nVendor Tax ID: 123-456-789\nBill To: Al Salam Hospital, Cairo\nItems:\n  Medical Gloves x500 @ EGP 2.50 = EGP 1,250.00\n  Surgical Masks x1000 @ EGP 1.80 = EGP 1,800.00\nSubtotal: EGP 3,050.00\nVAT (14%): EGP 427.00\nTotal Due: EGP 3,477.00\nPayment Terms: Net 30`
+  },
+  {
+    id:'DOC002', name:'national_id_ahmed.jpg', type:'National ID (EN)',
+    text:`ARAB REPUBLIC OF EGYPT\nNATIONAL ID CARD\nName: Ahmed Mohamed Hassan\nNational ID: 29901152501234\nDate of Birth: 15/01/1999\nGovernorate: Cairo\nAddress: 45 El Nasr Street, Nasr City, Cairo\nIssue Date: 10/03/2022\nExpiry Date: 10/03/2027\nGender: Male`
+  },
+  {
+    id:'DOC003', name:'office_lease_contract.pdf', type:'Contract',
+    text:`OFFICE LEASE AGREEMENT\nContract Reference: OLA-2024-055\nDate: 01 January 2024\nLandlord: Nile Tower Properties LLC\nTenant: TechStart Egypt S.A.E.\nProperty: Office Suite 12B, Smart Village, 6th of October City\nMonthly Rent: EGP 45,000\nSecurity Deposit: EGP 90,000\nLease Term: 2 years (01 Jan 2024 - 31 Dec 2025)\nGoverning Law: Egyptian Law`
+  },
+  {
+    id:'DOC004', name:'invoice_missing_fields.pdf', type:'Invoice (incomplete)',
+    text:`INVOICE\nDate: March 2024\nFrom: Some Supplier\nTotal Amount: EGP 5,000`
+  },
+  {
+    id:'DOC005', name:'arabic_id_fatima.jpg', type:'National ID (AR)',
+    text:`جمهورية مصر العربية\nبطاقة الرقم القومي\nالاسم: فاطمة علي محمود\nالرقم القومي: 30005201234567\nتاريخ الميلاد: 20/05/2000\nالمحافظة: الإسكندرية\nالعنوان: 12 شارع الجيش، سيدي بشر، الإسكندرية\nتاريخ الإصدار: 15/06/2023\nتاريخ الانتهاء: 15/06/2028\nالنوع: أنثى`
+  }
+];
+
+let selectedDoc = null;
+let cache = {};
+
+function renderSidebar() {
+  document.getElementById('doc-list').innerHTML = DOCS.map(d => {
+    const r = cache[d.id];
+    let badge = '<span class="doc-badge badge-pending">pending</span>';
+    if (r) {
+      const dec = r.evaluation.decision;
+      if (dec === 'APPROVED') badge = '<span class="doc-badge badge-approved">approved</span>';
+      else if (dec === 'FLAGGED_FOR_REVIEW') badge = '<span class="doc-badge badge-flagged">flagged</span>';
+      else badge = '<span class="doc-badge badge-rejected">rejected</span>';
+    }
+    return `<div class="doc-item ${selectedDoc?.id===d.id?'active':''}" onclick="selectDoc('${d.id}')">
+      <div class="doc-item-name">${d.name}</div>
+      <div class="doc-item-meta"><span class="doc-type-tag">${d.type}</span>${badge}</div>
+    </div>`;
+  }).join('');
+}
+
+function selectDoc(id) {
+  selectedDoc = DOCS.find(d => d.id === id);
+  document.getElementById('topbar-title').textContent = selectedDoc.name;
+  document.getElementById('topbar-sub').textContent = selectedDoc.id + ' · ' + selectedDoc.type;
+  document.getElementById('process-btn').disabled = false;
+  resetOrbs();
+  if (cache[id]) renderResults(cache[id]);
+  else renderEmpty();
+  renderSidebar();
+}
+
+function renderEmpty() {
+  document.getElementById('content').innerHTML = `
+    <div class="empty-state">
+      <div class="empty-icon">📄</div>
+      <div class="empty-title">${selectedDoc.name}</div>
+      <div class="empty-sub">Click "Process document" above to run this through the 4-agent pipeline.</div>
+    </div>`;
+}
+
+function resetOrbs() {
+  for (let i=1;i<=5;i++) {
+    document.getElementById('orb-'+i).className = 'agent-orb idle';
+    document.getElementById('det-'+i).className = 'agent-detail';
+  }
+  document.getElementById('det-1').textContent = 'M3 tool pattern';
+  document.getElementById('det-2').textContent = 'M5 code-as-plan';
+  document.getElementById('det-3').textContent = 'M3 tool pattern';
+  document.getElementById('det-4').textContent = 'M4 scoring';
+  document.getElementById('det-5').textContent = 'Awaiting input';
+}
+
+function setOrb(i, state, label) {
+  const el = document.getElementById('orb-'+i);
+  el.className = 'agent-orb ' + state;
+  const det = document.getElementById('det-'+i);
+  const cls = {running:'active', done:'done', warn:'warn', fail:'fail'}[state] || '';
+  det.className = 'agent-detail ' + cls;
+  if (label) det.textContent = label;
+}
+
+const delay = ms => new Promise(r => setTimeout(r, ms));
+
+async function runPipeline() {
+  if (!selectedDoc) return;
+  const btn = document.getElementById('process-btn');
+  btn.disabled = true;
+  document.getElementById('btn-icon').innerHTML = '<div class="spinner"></div>';
+  document.getElementById('btn-text').textContent = 'Processing…';
+  resetOrbs();
+
+  document.getElementById('content').innerHTML = `
+    <div class="card" style="font-family:var(--mono)">
+      <div class="card-header"><span class="card-icon">⚡</span><span class="card-title">Pipeline log</span></div>
+      <div id="log"></div>
+    </div>`;
+
+  function log(msg) {
+    const ts = new Date().toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    document.getElementById('log').innerHTML += `<div class="log-line"><span class="log-ts">${ts}</span><span class="log-msg">${msg}</span></div>`;
+  }
+
+  log('Pipeline started for ' + selectedDoc.id);
+  setOrb(1, 'running', 'Classifying…');
+  log('Agent 1 (Classifier) initialised');
+
+  const prompt = `You are a document processing pipeline. Analyse this document and return ONLY valid JSON with no markdown.
+
+Document text:
+${selectedDoc.text}
+
+Return this exact JSON structure:
+{
+  "classification": {
+    "doc_type": "invoice|national_id|contract|receipt|unknown",
+    "language": "english|arabic|mixed",
+    "confidence": 0.0-1.0,
+    "reasoning": "one sentence"
+  },
+  "extraction": {
+    "fields": { "key": "value or null" },
+    "confidence": 0.0-1.0,
+    "missing_fields": ["list"],
+    "code_pattern": "brief description of how you extracted the fields"
+  },
+  "validation": {
+    "checks": [{ "rule": "rule name", "passed": true/false, "detail": "short note" }],
+    "score": 0.0-1.0
+  },
+  "evaluation": {
+    "overall_score": 0.0-1.0,
+    "decision": "APPROVED|FLAGGED_FOR_REVIEW|REJECTED",
+    "recommendation": "one sentence for a human reviewer"
+  }
+}
+
+Rules: Extract all relevant fields for the document type. For national IDs: check name present, 14-digit Egyptian ID number, expiry not past. For invoices: invoice number, vendor, total, date required. For contracts: reference, both parties, dates required. Arabic documents must be fully supported. Score honestly.`;
+
+  try {
+    const resp = await fetch('/.netlify/functions/claude', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1200,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+
+    const data = await resp.json();
+    const raw = data.content[0].text.replace(/```json|```/g,'').trim();
+    const result = JSON.parse(raw);
+
+    log('Classification complete — ' + result.classification.doc_type + ' (' + Math.round(result.classification.confidence*100) + '%)');
+    setOrb(1, 'done', result.classification.doc_type + ' · ' + Math.round(result.classification.confidence*100) + '%');
+
+    await delay(350);
+    setOrb(2, 'running', 'Writing extraction code…');
+    log('Agent 2 (Extractor) — code-as-plan pattern');
+    await delay(500);
+    const exConf = result.extraction.confidence;
+    const fieldCount = Object.keys(result.extraction.fields).length;
+    log('Extracted ' + fieldCount + ' fields — confidence ' + Math.round(exConf*100) + '%');
+    setOrb(2, exConf >= 0.7 ? 'done' : 'warn', fieldCount + ' fields · ' + Math.round(exConf*100) + '%');
+
+    await delay(350);
+    setOrb(3, 'running', 'Running validation rules…');
+    log('Agent 3 (Validator) running ' + result.validation.checks.length + ' checks');
+    await delay(400);
+    const passed = result.validation.checks.filter(c=>c.passed).length;
+    log('Validation: ' + passed + '/' + result.validation.checks.length + ' checks passed');
+    setOrb(3, result.validation.score >= 0.7 ? 'done' : 'warn', passed + '/' + result.validation.checks.length + ' passed');
+
+    await delay(350);
+    setOrb(4, 'running', 'Scoring pipeline output…');
+    log('Agent 4 (Evaluator) computing weighted score');
+    await delay(400);
+    const ovr = result.evaluation.overall_score;
+    log('Overall score: ' + Math.round(ovr*100) + '% → ' + result.evaluation.decision);
+    setOrb(4, ovr >= 0.75 ? 'done' : 'warn', Math.round(ovr*100) + '% overall');
+
+    await delay(300);
+    const dec = result.evaluation.decision;
+    const orbState = {APPROVED:'done', FLAGGED_FOR_REVIEW:'warn', REJECTED:'fail'}[dec];
+    const decLabel = {APPROVED:'APPROVED ✓', FLAGGED_FOR_REVIEW:'FLAGGED ⚠', REJECTED:'REJECTED ✗'}[dec];
+    setOrb(5, orbState, decLabel);
+    log('Pipeline complete — ' + dec);
+
+    cache[selectedDoc.id] = result;
+    renderSidebar();
+
+    await delay(200);
+    renderResults(result);
+
+  } catch(e) {
+    log('ERROR: ' + e.message);
+    setOrb(1, 'fail', 'Error');
+    document.getElementById('content').innerHTML += `<div class="card" style="border-color:rgba(248,113,113,0.3)"><div style="color:var(--red);font-family:var(--mono);font-size:12px">Error: ${e.message}</div></div>`;
+  }
+
+  btn.disabled = false;
+  document.getElementById('btn-icon').textContent = '▶';
+  document.getElementById('btn-text').textContent = 'Process document';
+}
+
+function scoreColor(s) {
+  return s >= 0.75 ? 'var(--green)' : s >= 0.5 ? 'var(--amber)' : 'var(--red)';
+}
+function scoreClass(s) {
+  return s >= 0.75 ? 'c-green' : s >= 0.5 ? 'c-amber' : 'c-red';
+}
+
+function renderResults(r) {
+  const cl = r.classification, ex = r.extraction, va = r.validation, ev = r.evaluation;
+  const dec = ev.decision;
+  const decCls = {APPROVED:'approved', FLAGGED_FOR_REVIEW:'flagged', REJECTED:'rejected'}[dec] || '';
+  const decIcon = {APPROVED:'✅', FLAGGED_FOR_REVIEW:'⚠️', REJECTED:'❌'}[dec] || '🔵';
+  const decLabel = {APPROVED:'Approved — auto-processing', FLAGGED_FOR_REVIEW:'Flagged for human review', REJECTED:'Rejected — return to sender'}[dec] || dec;
+
+  const langPill = cl.language !== 'english' ? `<span class="lang-pill">${cl.language}</span>` : '';
+
+  const fieldRows = Object.entries(ex.fields).map(([k,v]) =>
+    `<div class="kv"><span class="kv-key">${k.replace(/_/g,' ')}</span><span class="kv-val ${!v?'missing':''}">${v||'not found'}</span></div>`
+  ).join('');
+
+  const checkRows = va.checks.map(c =>
+    `<div class="check ${c.passed?'check-ok':'check-no'}"><div class="check-dot"></div><span>${c.rule}: ${c.detail}</span></div>`
+  ).join('');
+
+  const scores = [
+    {label:'Classification', val: cl.confidence},
+    {label:'Extraction',     val: ex.confidence},
+    {label:'Validation',     val: va.score},
+    {label:'Overall',        val: ev.overall_score},
+  ];
+
+  document.getElementById('content').innerHTML = `
+    <div class="decision-bar ${decCls}">
+      <div class="decision-icon-wrap">${decIcon}</div>
+      <div>
+        <div class="decision-title">${decLabel}</div>
+        <div class="decision-rec">${ev.recommendation}</div>
+      </div>
+    </div>
+
+    <div class="score-row">
+      ${scores.map(s => `
+        <div class="score-card">
+          <div class="score-num ${scoreClass(s.val)}">${Math.round(s.val*100)}<span style="font-size:14px;opacity:0.5">%</span></div>
+          <div class="score-lbl">${s.label}</div>
+          <div class="score-bar-outer"><div class="score-bar-inner" style="width:${Math.round(s.val*100)}%;background:${scoreColor(s.val)}"></div></div>
+        </div>`).join('')}
+    </div>
+
+    <div class="results-3">
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-icon">🏷</span>
+          <span class="card-title">Classification ${langPill}</span>
+        </div>
+        <div class="kv"><span class="kv-key">type</span><span class="kv-val">${cl.doc_type}</span></div>
+        <div class="kv"><span class="kv-key">language</span><span class="kv-val">${cl.language}</span></div>
+        <div class="kv"><span class="kv-key">confidence</span><span class="kv-val ${scoreClass(cl.confidence)}">${Math.round(cl.confidence*100)}%</span></div>
+        <div class="reasoning-box">${cl.reasoning}</div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-icon">⚙️</span>
+          <span class="card-title">Extracted fields</span>
+        </div>
+        ${fieldRows}
+        ${ex.missing_fields.length ? `<div style="margin-top:8px;font-size:11px;color:var(--red);font-family:var(--mono)">missing: ${ex.missing_fields.join(', ')}</div>` : ''}
+        ${ex.code_pattern ? `<div class="reasoning-box" style="margin-top:10px">${ex.code_pattern}</div>` : ''}
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-icon">🛡</span>
+          <span class="card-title">Validation checks</span>
+        </div>
+        ${checkRows}
+      </div>
+
+    </div>`;
+}
+
+renderSidebar();
+</script>
+</body>
+</html>
